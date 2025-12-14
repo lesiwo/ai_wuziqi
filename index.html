@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 人机对战版</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            user-select: none; /* 防止双击选中文字 */
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+            border-radius: 4px;
+            background-color: #DEB887; /* 木纹色 */
+        }
+
+        canvas {
+            display: block;
+            cursor: pointer;
+        }
+
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 640px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #status {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            flex: 1;
+            text-align: left;
+        }
+
+        .settings {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        button {
+            padding: 8px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        /* 开关样式 */
+        .switch-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>五子棋 (人机对战)</h1>
+    
+    <div id="game-container">
+        <canvas id="chessBoard" width="640" height="640"></canvas>
+    </div>
+
+    <div class="controls">
+        <div id="status">当前回合: 黑棋 (玩家)</div>
+        
+        <div class="settings">
+            <label class="switch-label">
+                <input type="checkbox" id="aiMode" checked> 启用机器人
+            </label>
+            <button onclick="restartGame()">重新开始</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('chessBoard');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const aiModeCheckbox = document.getElementById('aiMode');
+
+        // 游戏配置
+        const BOARD_SIZE = 15; 
+        const PADDING = 40;    
+        const CELL_SIZE = 40;  
+        
+        // 游戏状态
+        let chessBoard = []; // 0: 空, 1: 黑(玩家), 2: 白(电脑/玩家2)
+        let me = true;       // true: 黑棋回合, false: 白棋回合
+        let isGameOver = false;
+        let isAiThinking = false; // 防止AI思考时玩家点击
+
+        // 初始化游戏
+        function initGame() {
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                chessBoard[i] = [];
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    chessBoard[i][j] = 0;
+                }
+            }
+            me = true;
+            isGameOver = false;
+            isAiThinking = false;
+            updateStatus();
+            drawBoard();
+        }
+
+        function updateStatus() {
+            if (isGameOver) return;
+            if (me) {
+                statusDiv.innerText = "当前回合: 黑棋 (玩家)";
+                statusDiv.style.color = "#333";
+            } else {
+                const isAi = aiModeCheckbox.checked;
+                statusDiv.innerText = isAi ? "当前回合: 白棋 (机器人思考中...)" : "当前回合: 白棋 (玩家2)";
+                statusDiv.style.color = isAi ? "#666" : "#333";
+            }
+        }
+
+        // 绘制棋盘背景
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 背景色
+            ctx.fillStyle = "#DEB887";
+            ctx.fillRect(0,0,canvas.width, canvas.height);
+
+            ctx.strokeStyle = "#555";
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                ctx.beginPath();
+                ctx.moveTo(PADDING, PADDING + i * CELL_SIZE);
+                ctx.lineTo(canvas.width - PADDING, PADDING + i * CELL_SIZE);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(PADDING + i * CELL_SIZE, PADDING);
+                ctx.lineTo(PADDING + i * CELL_SIZE, canvas.height - PADDING);
+                ctx.stroke();
+            }
+            
+            // 绘制星位
+            [ [3,3], [11,3], [7,7], [3,11], [11,11] ].forEach(pos => {
+                drawStar(pos[0], pos[1]);
+            });
+        }
+
+        function drawStar(i, j) {
+            ctx.beginPath();
+            ctx.arc(PADDING + i * CELL_SIZE, PADDING + j * CELL_SIZE, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = "#000";
+            ctx.fill();
+        }
+
+        // 绘制棋子
+        function drawPiece(i, j, isBlack) {
+            ctx.beginPath();
+            let x = PADDING + i * CELL_SIZE;
+            let y = PADDING + j * CELL_SIZE;
+            
+            ctx.arc(x, y, 18, 0, 2 * Math.PI);
+            
+            let gradient = ctx.createRadialGradient(x + 2, y - 2, 18, x + 2, y - 2, 0);
+            if (isBlack) {
+                gradient.addColorStop(0, "#0a0a0a");
+                gradient.addColorStop(1, "#636766");
+            } else {
+                gradient.addColorStop(0, "#d1d1d1");
+                gradient.addColorStop(1, "#f9f9f9");
+            }
+            
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // 标记最新落子
+            ctx.fillStyle = isBlack ? "white" : "black";
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // 绘制所有已存在的棋子（用于重绘）
+        function redrawPieces() {
+            for(let i=0; i<BOARD_SIZE; i++){
+                for(let j=0; j<BOARD_SIZE; j++){
+                    if(chessBoard[i][j] === 1) drawPiece(i, j, true);
+                    if(chessBoard[i][j] === 2) drawPiece(i, j, false);
+                }
+            }
+        }
+
+        // 点击事件
+        canvas.onclick = function(e) {
+            if (isGameOver || isAiThinking) return;
+            
+            // 如果是AI模式且轮到白棋，禁止玩家点击
+            if (aiModeCheckbox.checked && !me) return;
+
+            let rect = canvas.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            let i = Math.floor((x - PADDING + CELL_SIZE / 2) / CELL_SIZE);
+            let j = Math.floor((y - PADDING + CELL_SIZE / 2) / CELL_SIZE);
+
+            if (i < 0 || i >= BOARD_SIZE || j < 0 || j >= BOARD_SIZE) return;
+            if (chessBoard[i][j] !== 0) return;
+
+            // 玩家落子
+            oneStep(i, j, me);
+        }
+
+        // 执行一步落子
+        function oneStep(i, j, isBlack) {
+            chessBoard[i][j] = isBlack ? 1 : 2;
+            drawPiece(i, j, isBlack);
+
+            if (checkWin(i, j, isBlack ? 1 : 2)) {
+                statusDiv.innerText = (isBlack ? "黑棋" : "白棋") + " 获胜！";
+                statusDiv.style.color = "red";
+                isGameOver = true;
+                setTimeout(() => alert((isBlack ? "黑棋" : "白棋") + " 赢了！"), 50);
+                return;
+            }
+
+            me = !me;
+            updateStatus();
+
+            // 如果是AI模式，且轮到白棋，触发AI
+            if (!isGameOver && !me && aiModeCheckbox.checked) {
+                isAiThinking = true;
+                // 延迟500ms，让玩家看清自己的落子，也模拟思考时间
+                setTimeout(computerAI, 500);
+            }
+        }
+
+        // ---------------- AI 核心逻辑 ----------------
+
+        function computerAI() {
+            let myScore = []; // 玩家(黑)的分数
+            let computerScore = []; // 电脑(白)的分数
+            let max = 0; // 最高分
+            let u = 0, v = 0; // 最高分坐标
+
+            // 初始化分数数组
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                myScore[i] = [];
+                computerScore[i] = [];
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    myScore[i][j] = 0;
+                    computerScore[i][j] = 0;
+                }
+            }
+
+            // 遍历棋盘所有空位进行评分
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    if (chessBoard[i][j] === 0) {
+                        // 评估该位置对黑棋(玩家)的价值 -> 防守分数
+                        myScore[i][j] = evaluatePoint(i, j, 1);
+                        // 评估该位置对白棋(电脑)的价值 -> 进攻分数
+                        computerScore[i][j] = evaluatePoint(i, j, 2);
+
+                        // 综合评分逻辑
+                        // 电脑优先进攻，但如果玩家分数极高(快赢了)，则必须防守
+                        
+                        // 1. 假设该位置对玩家极好 (比如玩家有活三)
+                        if (myScore[i][j] > max) {
+                            max = myScore[i][j];
+                            u = i; v = j;
+                        } else if (myScore[i][j] === max) {
+                            if (computerScore[i][j] > computerScore[u][v]) {
+                                u = i; v = j;
+                            }
+                        }
+
+                        // 2. 假设该位置对电脑极好
+                        if (computerScore[i][j] > max) {
+                            max = computerScore[i][j];
+                            u = i; v = j;
+                        } else if (computerScore[i][j] === max) {
+                            if (myScore[i][j] > myScore[u][v]) {
+                                u = i; v = j;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 落子
+            isAiThinking = false;
+            oneStep(u, v, false);
+        }
+
+        // 评分函数：评估在 (x,y) 落子对于 color 方的价值
+        function evaluatePoint(x, y, color) {
+            let score = 0;
+            // 四个方向
+            const directions = [
+                [[1, 0], [-1, 0]], // 横
+                [[0, 1], [0, -1]], // 竖
+                [[1, 1], [-1, -1]], // 左斜
+                [[1, -1], [-1, 1]]  // 右斜
+            ];
+
+            for (let axis of directions) {
+                let count = 1; // 连子数 (包含当前假设的这一子)
+                let emptyEnds = 0; // 两端是否为空
+
+                // 向两个方向延伸
+                for (let dir of axis) {
+                    let dx = dir[0];
+                    let dy = dir[1];
+                    let nx = x + dx;
+                    let ny = y + dy;
+                    
+                    // 连续同色棋子
+                    while(nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && chessBoard[nx][ny] === color) {
+                        count++;
+                        nx += dx;
+                        ny += dy;
+                    }
+                    
+                    // 检查尽头是否为空位
+                    if(nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && chessBoard[nx][ny] === 0) {
+                        emptyEnds++;
+                    }
+                }
+
+                // 评分规则 (权重)
+                if (count >= 5) score += 100000; // 成五
+                else if (count === 4 && emptyEnds === 2) score += 10000; // 活四
+                else if (count === 4 && emptyEnds === 1) score += 1000;  // 冲四
+                else if (count === 3 && emptyEnds === 2) score += 1000;  // 活三
+                else if (count === 3 && emptyEnds === 1) score += 100;   // 眠三
+                else if (count === 2 && emptyEnds === 2) score += 100;   // 活二
+                else if (count === 2 && emptyEnds === 1) score += 10;    // 眠二
+            }
+            return score;
+        }
+
+        // ---------------- 胜负判定 ----------------
+
+        function checkWin(x, y, color) {
+            const directions = [
+                [[1, 0], [-1, 0]], 
+                [[0, 1], [0, -1]], 
+                [[1, 1], [-1, -1]], 
+                [[1, -1], [-1, 1]] 
+            ];
+
+            for (let axis of directions) {
+                let count = 1;
+                for (let dir of axis) {
+                    let dx = dir[0];
+                    let dy = dir[1];
+                    let nx = x + dx;
+                    let ny = y + dy;
+                    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && chessBoard[nx][ny] === color) {
+                        count++;
+                        nx += dx;
+                        ny += dy;
+                    }
+                }
+                if (count >= 5) return true;
+            }
+            return false;
+        }
+
+        function restartGame() {
+            initGame();
+        }
+
+        // 启动
+        initGame();
+
+    </script>
+</body>
+</html>
